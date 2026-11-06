@@ -20,17 +20,27 @@ Os nove arquivos ficam em `raw/` (formato `.csv.gz`):
 | `product_category_name_translation` | `traducao_categorias` | Categoria em português e inglês |
 | `olist_geolocation_dataset` | `geolocalizacao` | Coordenadas por prefixo de CEP |
 
-## Arquitetura
+## Arquitetura medalhão
+
+O projeto segue a **arquitetura medalhão** (*medallion architecture*): os dados passam por camadas de qualidade crescente, cada uma em um schema do DuckDB.
+
+| Camada medalhão | Schema | O que contém |
+|---|---|---|
+| Bronze | `raw` | Cópia fiel dos arquivos, tudo como texto, sem corrigir nada |
+| Silver | `refined` | Nomes em português, tipos corretos, duplicatas exatas removidas |
+| Gold | `marts` | Uma tabela por pergunta de negócio, pronta para consumo |
 
 ```
 raw/*.csv.gz ──► schema raw ──► schema refined ──► schema marts ──► painel / relatório
-   (ingestão)     (texto puro)   (tipos e limpeza)   (indicadores)     (app.py, relatorio.py)
+   (ingestão)     (bronze)         (silver)           (gold)         (app.py, relatorio.py)
 ```
 
-1. **raw**: cópia fiel dos arquivos. Tudo entra como texto, sem corrigir nada.
-2. **refined**: nomes em português, tipos corretos (datas, `DECIMAL` para dinheiro), remoção de linhas totalmente duplicadas. Nulos e anomalias do dado são mantidos.
-3. **marts**: uma tabela por pergunta de negócio, cada uma definida por um arquivo SQL em `sql/marts/`.
+1. **raw (bronze)**: cópia fiel dos arquivos. Tudo entra como texto, sem corrigir nada.
+2. **refined (silver)**: nomes em português, tipos corretos (datas, `DECIMAL` para dinheiro), remoção de linhas totalmente duplicadas. Nulos e anomalias do dado são mantidos.
+3. **marts (gold)**: uma tabela por pergunta de negócio, cada uma definida por um arquivo SQL em `sql/marts/`.
 4. **Consumo**: o painel e o relatório apenas leem os marts. Nenhum cálculo é feito na camada de apresentação.
+
+O banco `olist.duckdb` **não está no repositório** (passa de 100 MB, o limite do GitHub). Ele é criado na raiz do projeto ao rodar o pipeline, como mostra a seção "Como executar".
 
 ## Indicadores calculados
 
@@ -74,7 +84,8 @@ raw/                  CSVs originais (.csv.gz)
 pipeline/
   db.py               conexão com o DuckDB e gravação de tabelas
   ingestao.py         etapa 1: raw/*.csv.gz -> schema raw
-  transformacao.py    etapa 2: raw -> refined
+  transformacao.py    etapa 2: raw -> refined (geolocalização e chamada do módulo abaixo)
+  refinar_tabelas.py  etapa 2: raw -> refined das outras oito tabelas
   marts.py            etapa 3: sql/marts/*.sql -> schema marts
 sql/marts/            um arquivo SQL por indicador
 painel.py             leitura, formatação e gráficos (sem Streamlit)
@@ -82,7 +93,7 @@ app.py                painel interativo em Streamlit
 relatorio.py          gera relatorio.html
 ui.py                 explorador do banco no navegador (DuckDB UI)
 test/                 testes automatizados (pytest)
-olist.duckdb          banco gerado pelo pipeline
+olist.duckdb          banco gerado pelo pipeline (não versionado, ver .gitignore)
 ```
 
 ## Como executar
@@ -102,8 +113,6 @@ uv run python ui.py                   # explorar o banco (http://localhost:4213)
 ```
 
 As etapas são idempotentes: rodar várias vezes dá o mesmo resultado. O arquivo `olist.duckdb` aceita um único processo de escrita, então feche o painel ou o `ui.py` antes de rodar o pipeline de novo.
-
-> **Atenção:** o `pipeline/transformacao.py` atual trata apenas `geolocalizacao`. A versão completa, que gera as tabelas de `refined` usadas pelos marts, está em `pipeline/transformação_anterior.py`.
 
 ## Testes
 
